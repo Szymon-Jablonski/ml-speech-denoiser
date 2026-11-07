@@ -125,7 +125,7 @@ The clean recording is used to create the two views, but it is **not** used as t
 Compute the STFT of both noisy versions:
 
 ```math
-Y_1 = \operatorname{STFT}(y_1), \qquad Y_2 = \operatorname{STFT}(y_2)
+Y_1 = \mathrm{STFT}(y_1), \qquad Y_2 = \mathrm{STFT}(y_2)
 ```
 
 The network receives the first noisy spectrogram and predicts the second:
