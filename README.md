@@ -70,7 +70,7 @@ A practical first implementation is to work in the frequency domain:
 In notation:
 
 ```math
-Y = \operatorname{STFT}(y), \qquad X = \operatorname{STFT}(x)
+Y = \mathrm{STFT}(y), \qquad X = \mathrm{STFT}(x)
 ```
 
 ```math
