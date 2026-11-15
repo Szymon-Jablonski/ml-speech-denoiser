@@ -1,197 +1,102 @@
 # Speech Audio Denoiser
 
-## Project Description
+A university machine learning project that uses PyTorch to reduce background noise in speech recordings. A model takes a noisy recording and tries to produce a cleaner version. The result is compared with the clean reference and with other denoising methods. The goal is to learn and experiment, not to remove every kind of noise perfectly.
 
-Speech Audio Denoiser is a university machine learning project about reducing background noise in speech recordings. The project will use PyTorch to train a model that takes a noisy speech recording as input and tries to produce a clearer version.
+**Tools:** Python, PyTorch, `torchaudio`, spectrograms (STFT), objective metrics and listening tests.
 
-## Goal
-
-The goal is to learn how a neural network can separate speech from unwanted sounds, such as steady background noise. The model's output will be compared with the original clean recording to see how well it works, as well as compared with other denoising models and techniques. This project is for learning and experimentation; it is not intended to remove every kind of noise perfectly.
-
-## Planned Tools and Methods
-
-- **Python** for the project code.
-- **PyTorch** for building, training, and evaluating the machine learning model.
-- **Audio and signal-processing libraries** such as `torchaudio` for loading, preparing, and listening to recordings.
-- **Paired audio examples**: noisy recordings together with matching clean speech recordings, used to teach the model what the result should sound like.
-- **Spectrograms** to represent audio in a way that shows how its frequencies change over time. The model may work with these representations, depending on the final approach.
-- **Evaluation and listening tests** to compare the noisy input with the model's output and the clean reference.
-
-## Basic Project Plan
-
-1. Find or prepare a dataset containing clean speech and matching noisy speech.
-2. Load the recordings and prepare them for training.
-3. Build and train a PyTorch model to reduce noise.
-4. Test the model on recordings it has not seen during training.
-5. Compare the results using simple measurements and by listening to the audio.
-
-## Expected Result
-
-The project should produce a working experiment that can take a noisy speech recording and generate a denoised version. It will also show what the model does well, where it struggles, and how the quality of the training data affects the result.
+**Data:** clean Polish speech from [Common Voice](https://commonvoice.mozilla.org/) mixed with environmental noise from [UrbanSound8K](https://urbansounddataset.weebly.com/urbansound8k.html).
 
 ## Denoising Approaches
 
-This project will investigate two ways of training a neural network for speech denoising:
+We compare two training objectives. Both use the same network architecture, data splits and evaluation, so any difference in results comes from the objective itself.
 
-1. **Supervised denoising** – train the model using noisy recordings as inputs and their matching clean recordings as targets.
-2. **Self-supervised Noise2Noise denoising** – train the model using two independently corrupted versions of the same clean recording, without using the clean recording as the training target.
+### 1. Supervised (noisy → clean)
 
-Both approaches can use the same neural network architecture. Comparing them with the same data splits, preprocessing, and evaluation procedure makes it easier to study the effect of the training objective itself.
-
-### 1. Supervised denoising
-
-In supervised learning, the model is shown both the noisy audio and the clean audio that it should learn to reproduce.
-
-#### Preparing the training examples
-
-Start with a clean speech recording $x(t)$ and a noise recording $n(t)$. Mix them to create a noisy recording:
+Mix clean speech $x(t)$ with noise $n(t)$, where $\alpha$ sets the signal-to-noise ratio (SNR):
 
 ```math
 y(t) = x(t) + \alpha \, n(t)
 ```
 
-Here, $\alpha$ controls the noise level. It can be varied to create examples with different signal-to-noise ratios (SNRs). Before mixing, make sure the speech and noise have the same sample rate and compatible lengths. Noise can be cropped or looped as needed, and its level can be adjusted to achieve a chosen SNR.
-
-Each training example consists of:
-
-- **Input:** the noisy recording $y(t)$.
-- **Target:** the corresponding clean recording $x(t)$.
-
-#### Using spectrograms
-
-A practical first implementation is to work in the frequency domain:
-
-1. Load the clean speech and noise audio.
-2. Create a noisy mixture.
-3. Compute the Short-Time Fourier Transform (STFT) of the noisy mixture and clean speech.
-4. Feed the noisy spectrogram to the network.
-5. Train the network to predict the clean spectrogram.
-
-In notation:
+The network $f_\theta$ (a small CNN or U-Net) maps the noisy spectrogram to the clean one:
 
 ```math
-Y = \mathrm{STFT}(y), \qquad X = \mathrm{STFT}(x)
+Y = \mathrm{STFT}(y), \quad X = \mathrm{STFT}(x), \quad \hat{X} = f_\theta(Y), \quad \mathcal{L}_{\mathrm{sup}} = \lVert \hat{X} - X \rVert_1
+```
+
+The first version predicts magnitude spectrograms. To turn the output back into audio, it reuses the phase of the noisy input, which is an approximation. A later version can predict the complex STFT (real and imaginary parts) instead. Clean and noise recordings are split into train, validation and test sets **before** mixing, so related mixtures cannot leak across splits.
+
+### 2. Self-supervised Noise2Noise (noisy → noisy)
+
+Make two noisy versions of the same clean recording, each with its own independently sampled zero-mean noise:
+
+```math
+y_1(t) = x(t) + n_1(t), \qquad y_2(t) = x(t) + n_2(t)
 ```
 
 ```math
-\hat{X} = f_\theta(Y)
+\hat{Y}_2 = f_\theta(Y_1), \qquad \mathcal{L}_{\mathrm{N2N}} = \lVert \hat{Y}_2 - Y_2 \rVert_2^2
 ```
 
-The network $f_\theta$ can initially be a relatively small convolutional neural network (CNN) or U-Net. A simple starting loss is the mean absolute error (L1):
-
-```math
-\mathcal{L}_{\mathrm{sup}} = \lVert \hat{X} - X \rVert_1
-```
-
-Mean squared error (MSE) is another option. The initial implementation can predict the magnitude spectrogram, which is simpler to handle. To reconstruct audio from a predicted magnitude spectrogram, the phase of the noisy input is commonly reused; this is an approximation and can limit audio quality. A later experiment could predict the real and imaginary components of the complex STFT instead.
-
-Finally, convert the predicted representation back to a waveform using the inverse STFT.
-
-#### Implementation outline
-
-1. Create a dataset that returns aligned `(noisy_spectrogram, clean_spectrogram)` pairs.
-2. Split the original clean recordings and noise recordings into training, validation, and test sets **before** creating mixtures. This helps prevent closely related mixtures from leaking across splits.
-3. Implement a CNN or U-Net that accepts the chosen spectrogram representation and predicts the clean representation.
-4. Train using the supervised loss, monitoring validation loss and audio quality.
-5. Save the best model checkpoint and test it on recordings that were not used for training or model selection.
-
-### 2. Self-supervised denoising with Noise2Noise
-
-Noise2Noise uses a different training target. Instead of requiring a clean target for every input, it learns from two independently corrupted versions of the same underlying clean recording.
-
-#### Preparing the training examples
-
-Take one clean recording $x(t)$ and create two noisy versions using independent noise realizations:
-
-```math
-y_1(t) = x(t) + n_1(t)
-```
-
-```math
-y_2(t) = x(t) + n_2(t)
-```
-
-The noise signals $n_1(t)$ and $n_2(t)$ should be independently sampled and, for the standard Noise2Noise justification, have zero mean and be independent of the clean signal.
-
-Each training example consists of:
-
-- **Input:** the first noisy version $y_1(t)$.
-- **Target:** the second noisy version $y_2(t)$.
-
-The clean recording is used to create the two views, but it is **not** used as the target in the Noise2Noise training loss.
-
-#### Training the model
-
-Compute the STFT of both noisy versions:
-
-```math
-Y_1 = \mathrm{STFT}(y_1), \qquad Y_2 = \mathrm{STFT}(y_2)
-```
-
-The network receives the first noisy spectrogram and predicts the second:
-
-```math
-\hat{Y}_2 = f_\theta(Y_1)
-```
-
-A simple loss is:
-
-```math
-\mathcal{L}_{\mathrm{N2N}} = \lVert \hat{Y}_2 - Y_2 \rVert_2^2
-```
-
-The intuition is that the two noise realizations are unrelated. Across many examples, predicting the noise in the second view does not help the model minimize the expected squared error; predicting the shared underlying speech does. Under the assumptions above, the optimal prediction is therefore the clean signal representation.
-
-For the standard mathematical argument, it is safest to apply the loss to the **complex STFT** (or to the waveform). The STFT is linear, so additive zero-mean noise remains zero-mean in this representation. Magnitude is a nonlinear operation, however, and the magnitude of a noisy spectrogram is not simply the clean magnitude plus zero-mean noise. Therefore, the simple Noise2Noise guarantee does not directly carry over to a magnitude-only target.
-
-#### Implementation outline
-
-1. Start with a clean training recording and generate two mixtures using independently selected noise segments or independently generated noise.
-2. Compute both complex STFTs.
-3. Create a dataset that returns `(noisy_view_1, noisy_view_2)` pairs. Do not return the clean spectrogram as the training target.
-4. Use the same CNN or U-Net architecture as in the supervised experiment, adapted to accept and predict the real and imaginary STFT components.
-5. Train with the Noise2Noise loss and monitor validation performance.
-6. At inference time, provide just one noisy recording to the model. The model does not need a second noisy version.
+The two noise signals are unrelated, so the model cannot learn to predict $n_2$. The prediction that minimises the expected error is therefore the clean speech. This argument holds for the **complex STFT** or the waveform, because both are linear in the signal. It does not hold for magnitude spectrograms. At inference time the model needs only one noisy recording.
 
 > [!IMPORTANT]
-> This is self-supervised training because the target is another noisy view rather than a clean label. If both views are synthesized from clean recordings, however, the experiment still relies on access to clean source recordings to construct its training examples. It does not yet demonstrate learning from naturally noisy, unlabelled recordings alone.
+> Both noisy versions are still made from clean recordings. This shows the training objective works, but it does not show learning from naturally noisy, unlabelled data.
 
-### 3. Suggested experiment workflow
+### Workflow
 
-A manageable order for implementing the project is:
+1. Inspect the data and create leakage-safe splits.
+2. Build a shared pipeline: mixing, SNR control, STFT and inverse STFT. Check that audio comes back unchanged when no denoising is applied.
+3. Train the supervised baseline, then Noise2Noise with the same architecture.
+4. Evaluate both on the same held-out mixtures, using metrics and listening.
+5. Discuss limitations: noise type, SNR, data size, phase handling and the Noise2Noise assumptions.
 
-1. **Prepare and inspect the data.** Load clean speech and noise recordings, check sample rates and durations, and listen to the source recordings.
-2. **Create leakage-safe splits.** Split source recordings into training, validation, and test groups before generating noisy mixtures.
-3. **Build a shared preprocessing pipeline.** Implement mixing, SNR control, STFT, and inverse STFT. Check that audio can be reconstructed correctly when no denoising is applied.
-4. **Implement the supervised baseline.** Train a small CNN or U-Net using noisy-to-clean pairs.
-5. **Implement Noise2Noise.** Reuse the architecture and preprocessing where possible, but create independent noisy views and train from view 1 to view 2.
-6. **Evaluate both models consistently.** Use the same held-out test mixtures and clean references, calculate objective metrics, and listen to the outputs.
-7. **Discuss limitations.** Consider the effects of noise type, SNR, training data size, phase handling, and the assumptions required by Noise2Noise.
+## Running in Google Colab
 
-## How To
+The notebooks are designed for Google Colab, so training can use its free GPU.
 
-The project is a Jupyter notebook ([`audio_denoiser.ipynb`](audio_denoiser.ipynb)) that is meant to run in **Google Colab**, so it can use Colab's free GPU instead of local hardware.
+| Notebook | Open |
+|---|---|
+| `denoiser_generate_datasets.ipynb` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Szymon-Jablonski/ml-speech-denoiser/blob/main/denoiser_generate_datasets.ipynb) |
+| `denoiser_cnn.ipynb` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Szymon-Jablonski/ml-speech-denoiser/blob/main/denoiser_cnn.ipynb) |
+| `denoiser_noise2noise.ipynb` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Szymon-Jablonski/ml-speech-denoiser/blob/main/denoiser_noise2noise.ipynb) |
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Szymon-Jablonski/ml-audio-denoiser/blob/main/audio_denoiser.ipynb)
+### 1. Add the shared data folder to your Drive
 
-### Run the notebook in Google Colab
+The datasets are stored in a shared Google Drive folder:
+https://drive.google.com/drive/folders/1FogEgAKr39y7ODDGQTP3SFny2-JZ5sPK?usp=sharing
 
-1. **Open the notebook.** Click the *Open in Colab* badge above, or in Colab go to *File → Open notebook → GitHub*, paste `https://github.com/Szymon-Jablonski/ml-audio-denoiser` and choose `audio_denoiser.ipynb`.
-2. **Turn on the GPU.** Go to *Runtime → Change runtime type*, select *T4 GPU* (or any available GPU) and click *Save*.
-3. **Run the cells.** Run them from top to bottom (*Runtime → Run all*, or `Shift + Enter` cell by cell). The first cell installs the required packages and the next one prints whether the GPU is visible.
-4. **(Optional) Mount Google Drive.** Colab's disk is wiped when the runtime disconnects. Set `USE_DRIVE = True` in the configuration cell to store datasets and model checkpoints in your Google Drive (`MyDrive/ml-audio-denoiser/`) so they survive between sessions.
-5. **Save your changes.** Edits made in Colab are not written to this repository automatically. Use *File → Save a copy in GitHub*, or download the notebook (*File → Download → .ipynb*) and commit it.
+The notebooks expect the data at `MyDrive/Denoiser/`. To set this up:
+
+1. Open the link above, right-click the folder and choose **Organize → Add shortcut**. Pick **My Drive** as the location.
+2. Make sure the shortcut is named **`Denoiser`**. It should contain `CommonVoice27_PL.tar`, `UrbanSound8K.tar` and `DenoiserData.tar`.
+
+### 2. Run a notebook
+
+1. Open the notebook with one of the badges above. You can also go to *File → Open notebook → GitHub* in Colab and paste the repository URL.
+2. Select *Runtime → Change runtime type → T4 GPU*.
+3. Run the first cell. It mounts your Drive:
+   ```python
+   from google.colab import drive
+   drive.mount('/content/drive')
+   ```
+   Allow access when prompted. The shared files then appear under `/content/drive/MyDrive/Denoiser/`.
+4. Run the remaining cells from top to bottom. They unpack the `.tar` archives to `/content/`, which is Colab's fast local disk, and install the required packages.
+
+Colab's local disk is wiped when the runtime disconnects. Keep anything you want to reuse, such as datasets or checkpoints, on Drive. Changes you make in Colab are not saved to this repository. Use *File → Save a copy in GitHub*, or download the `.ipynb` file and commit it yourself.
 
 ### Running locally (optional)
 
-The notebook can also run on a local machine (training will be slow without a GPU):
+To run locally, put the extracted datasets in the repository root and replace the `/content/...` paths in the notebooks with your local paths. Skip the `drive.mount` cell.
 
 ```bash
-pip install torch torchaudio soundfile matplotlib jupyter
-jupyter notebook audio_denoiser.ipynb
+pip install torch torchaudio soundfile matplotlib pandas tqdm jupyter
+jupyter notebook
 ```
 
-### Repository structure
+## Repository Structure
 
-- `audio_denoiser.ipynb` – main notebook: setup, data preparation, model, training and evaluation.
-- `README.md` – project description and instructions.
+- [`denoiser_generate_datasets.ipynb`](denoiser_generate_datasets.ipynb): builds the training and validation sets. It mixes Common Voice speech with UrbanSound8K noise at a chosen SNR and saves the result as `DenoiserData.tar`.
+- [`denoiser_cnn.ipynb`](denoiser_cnn.ipynb): the supervised CNN denoiser. It loads `DenoiserData`, generates spectrograms, and covers the model, training and evaluation.
+- [`denoiser_noise2noise.ipynb`](denoiser_noise2noise.ipynb): the self-supervised Noise2Noise denoiser (work in progress).
+- `README.md`: project description and instructions.
